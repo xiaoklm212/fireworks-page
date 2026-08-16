@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>烟花</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #050a18;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #fallback {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #eaf2ff;
+    font: 16px/1.6 system-ui, sans-serif;
+  }
+  #fallback[hidden] {
+    display: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="fireworks" aria-label="烟花效果"></canvas>
+<div id="fallback" hidden>当前浏览器不支持 Canvas。</div>
+<script>
+(function () {
+  'use strict';
+  const DEFAULT_CAP = 800;
+  const LOW_CAP = 500;
+  const LOW_FPS = 45;
+  const FPS_WINDOW = 120;
+  const TAU = Math.PI * 2;
+  const PALETTE = ['#ffd76e', '#ff9ad5', '#8fe3ff', '#b7ffa8', '#ff8f70'];
+
+  function rand(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  function pick(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function makeWorld(width, height, cap = DEFAULT_CAP) {
+    return { width, height, cap, time: 0, rockets: [], particles: [], stars: [] };
+  }
+
+  function addParticle(world, particle) {
+    if (world.particles.length >= world.cap) world.particles.shift();
+    world.particles.push(particle);
+  }
+
+  function pickShape() {
+    const r = Math.random();
+    if (r < 0.6) return 'sphere';
+    if (r < 0.8) return 'ring';
+    return 'willow';
+  }
+
+  function launchRocket(world, targetX, targetY, opts = {}) {
+    const startX = opts.startX ?? targetX;
+    const startY = world.height + 24;
+    const dx = targetX - startX;
+    const dy = targetY - startY;
+    const dist = Math.hypot(dx, dy) || 1;
+    const speed = opts.speed ?? rand(620, 760);
+    const rocket = {
+      x: startX,
+      y: startY,
+      vx: (dx / dist) * speed,
+      vy: (dy / dist) * speed,
+      targetX,
+      targetY,
+      color: opts.color ?? pick(PALETTE),
+      shape: opts.shape ?? pickShape(),
+      trailTimer: 0
+    };
+    world.rockets.push(rocket);
+    return rocket;
+  }
+
+  function explodeAt(world, x, y, color, shape = 'sphere') {
+    const counts = { sphere: 90, ring: 60, willow: 70 };
+    const speedBase = { sphere: 190, ring: 150, willow: 120 };
+    const count = counts[shape] ?? 70;
+    const base = speedBase[shape] ?? 150;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * TAU + rand(-0.08, 0.08);
+      const speed = shape === 'ring'
+        ? base * rand(0.92, 1.08)
+        : base * Math.pow(Math.random(), 0.55);
+      const life = shape === 'willow' ? rand(1.6, 2.6) : rand(0.9, 1.5);
+      addParticle(world, {
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life,
+        maxLife: life,
+        size: rand(1.2, 2.4),
+        color,
+        gravity: shape === 'willow' ? 45 : 90,
+        drag: shape === 'willow' ? 0.92 : 0.88,
+        trail: shape !== 'ring',
+        twinkle: Math.random() < 0.25,
+        phase: 0
+      });
+    }
+  }
+
+  function updateWorld(world, dt) {
+    const maxStep = 1 / 60;
+    let remaining = Math.max(0, dt);
+    while (remaining > 0) {
+      const step = Math.min(remaining, maxStep);
+      const rocketsLeft = [];
+      for (const rocket of world.rockets) {
+        rocket.x += rocket.vx * step;
+        rocket.y += rocket.vy * step;
+        rocket.trailTimer -= step;
+        if (rocket.trailTimer <= 0) {
+          rocket.trailTimer = 0.02;
+          addParticle(world, {
+            x: rocket.x,
+            y: rocket.y,
+            vx: rand(-8, 8),
+            vy: rand(-8, 8),
+            life: 0.18,
+            maxLife: 0.18,
+            size: rand(0.8, 1.6),
+            color: rocket.color,
+            gravity: 0,
+            drag: 1,
+            trail: false,
+            twinkle: false,
+            phase: 0
+          });
+        }
+        const dx = rocket.targetX - rocket.x;
+        const dy = rocket.targetY - rocket.y;
+        if (dx * dx + dy * dy < 900) {
+          explodeAt(world, rocket.targetX, rocket.targetY, rocket.color, rocket.shape);
+        } else {
+          rocketsLeft.push(rocket);
+        }
+      }
+      world.rockets = rocketsLeft;
+
+      const particlesLeft = [];
+      for (const p of world.particles) {
+        p.life -= step;
+        if (p.life <= 0) continue;
+        const dragFactor = Math.pow(p.drag, step);
+        p.vx *= dragFactor;
+        p.vy *= dragFactor;
+        p.vy += p.gravity * step;
+        p.x += p.vx * step;
+        p.y += p.vy * step;
+        p.phase += step * 8;
+        particlesLeft.push(p);
+      }
+      world.particles = particlesLeft;
+      world.time += step;
+      remaining -= step;
+    }
+  }
+
+  function assessPerformance(fpsWindow) {
+    if (fpsWindow.length < 30) return { quality: 'normal', cap: DEFAULT_CAP };
+    const recent = fpsWindow.slice(-30);
+    const avg = recent.reduce((sum, fps) => sum + fps, 0) / recent.length;
+    if (avg < LOW_FPS) return { quality: 'low', cap: LOW_CAP };
+    return { quality: 'normal', cap: DEFAULT_CAP };
+  }
+
+  function createStars(world, count = 70) {
+    world.stars.length = 0;
+    for (let i = 0; i < count; i++) {
+      world.stars.push({
+        x: Math.random() * world.width,
+        y: Math.random() * world.height * 0.8,
+        r: rand(0.3, 1.3),
+        phase: rand(0, TAU),
+        speed: rand(0.5, 2)
+      });
+    }
+    return world.stars;
+  }
+
+  const api = {
+    DEFAULT_CAP,
+    LOW_CAP,
+    LOW_FPS,
+    FPS_WINDOW,
+    PALETTE,
+    rand,
+    pick,
+    makeWorld,
+    addParticle,
+    pickShape,
+    launchRocket,
+    explodeAt,
+    updateWorld,
+    assessPerformance,
+    createStars
+  };
+
+  if (typeof window !== 'undefined') window.FireworksCore = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})();
+
+(function () {
+  'use strict';
+  if (typeof document === 'undefined') return;
+  const canvas = document.getElementById('fireworks');
+  const fallback = document.getElementById('fallback');
+  if (!canvas || !canvas.getContext) {
+    if (fallback) fallback.hidden = false;
+    return;
+  }
+  const ctx = canvas.getContext('2d');
+  const DPR_CAP = 2;
+  const core = window.FireworksCore;
+  let cssWidth = window.innerWidth;
+  let cssHeight = window.innerHeight;
+  let dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+  let world = null;
+  let rafId = 0;
+  let lastTime = 0;
+  let fpsSamples = [];
+  let fpsAccum = 0;
+  let fpsFrames = 0;
+  let autoTimer = 0;
+  let lowQuality = false;
+
+  function resize() {
+    cssWidth = window.innerWidth;
+    cssHeight = window.innerHeight;
+    dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!world) {
+      world = core.makeWorld(cssWidth, cssHeight, core.DEFAULT_CAP);
+    } else {
+      world.width = cssWidth;
+      world.height = cssHeight;
+    }
+    core.createStars(world, 70);
+  }
+
+  function launchAt(x, y) {
+    core.launchRocket(world, x, y, {
+      color: core.pick(core.PALETTE),
+      shape: core.pickShape()
+    });
+  }
+
+  function scheduleAuto() {
+    const delay = lowQuality ? core.rand(4500, 6500) : core.rand(2500, 4500);
+    autoTimer = setTimeout(() => {
+      const x = core.rand(cssWidth * 0.1, cssWidth * 0.9);
+      const y = core.rand(cssHeight * 0.15, cssHeight * 0.6);
+      launchAt(x, y);
+      scheduleAuto();
+    }, delay);
+  }
+
+  function render() {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(5, 10, 24, 0.22)';
+    ctx.fillRect(0, 0, cssWidth, cssHeight);
+    ctx.globalCompositeOperation = 'lighter';
+    const time = world.time;
+    for (const star of world.stars) {
+      const a = 0.35 + 0.3 * Math.sin(time * star.speed + star.phase);
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + Math.max(0.08, a).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(star.x, star.y, star.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (const rocket of world.rockets) {
+      ctx.fillStyle = rocket.color;
+      ctx.beginPath();
+      ctx.arc(rocket.x, rocket.y, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (const p of world.particles) {
+      const alpha = Math.max(0, Math.min(1, p.life / p.maxLife));
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.fillStyle = p.color;
+      const size = p.twinkle ? p.size * (0.7 + 0.5 * Math.abs(Math.sin(p.phase))) : p.size;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function frame(now) {
+    const dt = lastTime ? Math.min((now - lastTime) / 1000, 0.1) : 0.016;
+    lastTime = now;
+    core.updateWorld(world, dt);
+    render();
+    fpsAccum += dt;
+    fpsFrames++;
+    if (fpsAccum >= 1) {
+      fpsSamples.push(fpsFrames / fpsAccum);
+      if (fpsSamples.length > core.FPS_WINDOW) fpsSamples.shift();
+      const result = core.assessPerformance(fpsSamples);
+      if (result.quality === 'low' && !lowQuality) {
+        lowQuality = true;
+        world.cap = result.cap;
+      } else if (result.quality === 'normal' && lowQuality && world.particles.length < core.LOW_CAP) {
+        lowQuality = false;
+        world.cap = result.cap;
+      }
+      fpsAccum = 0;
+      fpsFrames = 0;
+    }
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function start() {
+    cancelAnimationFrame(rafId);
+    lastTime = 0;
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function stop() {
+    cancelAnimationFrame(rafId);
+    clearTimeout(autoTimer);
+  }
+
+  window.addEventListener('resize', resize);
+  document.addEventListener('pointerdown', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * cssWidth;
+    const y = ((event.clientY - rect.top) / rect.height) * cssHeight;
+    launchAt(x, y);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stop();
+    } else {
+      start();
+      scheduleAuto();
+    }
+  });
+  resize();
+  start();
+  scheduleAuto();
+})();
+</script>
+</body>
+</html>
