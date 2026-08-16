@@ -101,6 +101,16 @@
     text-shadow: 0 0 18px rgba(255, 255, 255, 0.22), 0 2px 3px rgba(0, 0, 0, 0.5);
     transform: rotate(-1.5deg);
   }
+  #blessing-text .blessing-char {
+    display: inline-block;
+    transition: opacity 0.75s ease, transform 0.95s cubic-bezier(0.22, 0.61, 0.36, 1), filter 0.75s ease;
+    will-change: opacity, transform, filter;
+  }
+  #blessing-text.dissolve .blessing-char {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(0.2);
+    filter: blur(4px);
+  }
   #stardust {
     position: fixed;
     z-index: 2;
@@ -434,8 +444,19 @@
 
   function showBlessing(x, y) {
     if (!blessingEl) return;
-    blessingText.textContent = core.pick(BLESSINGS);
+    const phrase = core.pick(BLESSINGS);
     blessingText.className = core.pick(['blessing-style-2', 'blessing-style-5']);
+    blessingText.innerHTML = '';
+    for (const ch of phrase) {
+      const span = document.createElement('span');
+      span.className = 'blessing-char';
+      span.textContent = ch;
+      span.style.setProperty('--dx', (Math.random() * 150 - 75).toFixed(1) + 'px');
+      span.style.setProperty('--dy', (30 + Math.random() * 110).toFixed(1) + 'px');
+      span.style.setProperty('--rot', (Math.random() * 50 - 25).toFixed(1) + 'deg');
+      span.style.transitionDelay = (Math.random() * 0.12).toFixed(3) + 's';
+      blessingText.appendChild(span);
+    }
     const pad = 24;
     const half = 80;
     const left = Math.min(Math.max(x, pad + half), cssWidth - pad - half);
@@ -448,6 +469,7 @@
     scatterStardust(x, y);
     clearTimeout(blessingTimer);
     blessingTimer = setTimeout(() => {
+      blessingText.classList.add('dissolve');
       blessingEl.classList.add('fade');
     }, 850);
   }
