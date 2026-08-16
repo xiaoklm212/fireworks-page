@@ -40,8 +40,8 @@
 <script>
 (function () {
   'use strict';
-  const DEFAULT_CAP = 800;
-  const LOW_CAP = 500;
+  const DEFAULT_CAP = 1400;
+  const LOW_CAP = 800;
   const LOW_FPS = 45;
   const FPS_WINDOW = 120;
   const TAU = Math.PI * 2;
@@ -94,7 +94,7 @@
   }
 
   function explodeAt(world, x, y, color, shape = 'sphere') {
-    const counts = { sphere: 90, ring: 60, willow: 70 };
+    const counts = { sphere: 140, ring: 100, willow: 110 };
     const speedBase = { sphere: 190, ring: 150, willow: 120 };
     const count = counts[shape] ?? 70;
     const base = speedBase[shape] ?? 150;
@@ -271,7 +271,7 @@
   }
 
   function scheduleAuto() {
-    const delay = lowQuality ? core.rand(4500, 6500) : core.rand(2500, 4500);
+    const delay = lowQuality ? core.rand(2200, 3200) : core.rand(1200, 2200);
     autoTimer = setTimeout(() => {
       const x = core.rand(cssWidth * 0.1, cssWidth * 0.9);
       const y = core.rand(cssHeight * 0.15, cssHeight * 0.6);
